@@ -3,9 +3,8 @@ import { db, codesTable } from "@workspace/db";
 import type { BotContext } from "../../types.js";
 import { panel } from "../../utils/format.js";
 import { setConvo, clearConvo } from "../../convo-state.js";
-import { sendAnimated, GENERATE_FRAMES } from "../../utils/animations.js";
+import { editAnimated, GENERATE_FRAMES } from "../../utils/animations.js";
 import { safeDelete } from "../../utils/safe-delete.js";
-import { sleep } from "../../utils/sleep.js";
 
 export async function startGenerateCodes(ctx: BotContext): Promise<void> {
   await ctx.answerCbQuery();
@@ -37,9 +36,13 @@ export async function handleCodesCount(
 ): Promise<void> {
   const n = parseInt(countStr.trim(), 10);
   if (isNaN(n) || n < 1 || n > 100) {
-    await ctx.reply("⎋  Invalid number. Enter 1-100:");
+    const errMsg = await ctx.reply("⎋  Invalid. Enter a number between 1-100:");
+    setTimeout(() => safeDelete(ctx.telegram, ctx.chat!.id, errMsg.message_id), 4000);
     return;
   }
+
+  // Delete user's input message
+  await safeDelete(ctx.telegram, ctx.chat!.id, ctx.message?.message_id);
 
   setConvo(ctx.from!.id, { type: "gen_codes_points", data: { count: n } });
 
@@ -64,15 +67,21 @@ export async function handleCodesPoints(
 ): Promise<void> {
   const points = parseInt(pointsStr.trim(), 10);
   if (isNaN(points) || points < 1) {
-    await ctx.reply("⎋  Invalid value. Enter a positive number:");
+    const errMsg = await ctx.reply("⎋  Invalid. Enter a positive number:");
+    setTimeout(() => safeDelete(ctx.telegram, ctx.chat!.id, errMsg.message_id), 4000);
     return;
   }
 
   clearConvo(ctx.from!.id);
 
-  const animId = await sendAnimated(ctx, GENERATE_FRAMES, 450);
-  await sleep(300);
-  await safeDelete(ctx.telegram, ctx.chat!.id, animId);
+  // Delete user's input message
+  await safeDelete(ctx.telegram, ctx.chat!.id, ctx.message?.message_id);
+
+  // Animate in-place on the step-2 message (last bot message before this)
+  // We send a fresh animation message since we don't have the step-2 message ID
+  const animMsg = await ctx.reply(GENERATE_FRAMES[0]!);
+  await editAnimated(ctx, animMsg.message_id, GENERATE_FRAMES.slice(1), 420);
+  await safeDelete(ctx.telegram, ctx.chat!.id, animMsg.message_id);
 
   // Generate unique codes
   const codes: string[] = [];
@@ -80,25 +89,28 @@ export async function handleCodesPoints(
     codes.push(generateCode());
   }
 
-  // Insert into DB
-  await db.insert(codesTable).values(
-    codes.map((code) => ({ code, points }))
-  );
+  await db.insert(codesTable).values(codes.map((code) => ({ code, points })));
 
-  const codeList = codes.map((c) => `◈  ${c}`).join("\n");
-  const text =
-    panel("CODES GENERATED ✦", [
-      `◎  Count: ${count}`,
-      `◌  Points: ${points} each`,
-      "─────────────────────",
-    ]) +
-    "\n\n" +
-    codeList;
+  // Header panel
+  const header = panel("CODES GENERATED ✦", [
+    `◎  Count: ${count}`,
+    `◌  Points: ${points} each`,
+    "─────────────────────",
+    "◈  Tap a code to copy:",
+  ]);
 
-  await ctx.reply(
-    text,
-    Markup.inlineKeyboard([[Markup.button.callback("« BACK", "admin")]])
-  );
+  // Codes in monospace — each on its own line, tappable to copy
+  const codeLines = codes.map((c) => `<code>${c}</code>`).join("\n");
+  const fullText = `${header}\n\n${codeLines}`;
+
+  // Telegram messages have a 4096 char limit — split if needed
+  const chunks = splitMessage(fullText, 4096);
+  for (const chunk of chunks) {
+    await ctx.reply(chunk, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[Markup.button.callback("« BACK", "admin")]]),
+    });
+  }
 }
 
 function generateCode(): string {
@@ -111,7 +123,23 @@ function generateCode(): string {
   return code;
 }
 
-// User code redemption
+function splitMessage(text: string, limit: number): string[] {
+  if (text.length <= limit) return [text];
+  const chunks: string[] = [];
+  const lines = text.split("\n");
+  let current = "";
+  for (const line of lines) {
+    if ((current + "\n" + line).length > limit) {
+      if (current) chunks.push(current);
+      current = line;
+    } else {
+      current = current ? current + "\n" + line : line;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 export async function handleCodeRedeem(
   ctx: BotContext,
   code: string
@@ -125,23 +153,31 @@ export async function handleCodeRedeem(
     .where(eq(codesTable.code, code.toUpperCase()))
     .limit(1);
 
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback("« BACK TO MENU", "menu")],
+  ]);
+
   if (!found) {
-    await ctx.reply(
+    const msg = await ctx.reply(
       panel("INVALID CODE", [
         "◈  Code not found.",
         "◌  Check and try again.",
-      ])
+      ]),
+      keyboard
     );
+    setTimeout(() => safeDelete(ctx.telegram, ctx.chat!.id, msg.message_id), 8000);
     return;
   }
 
   if (found.isUsed) {
-    await ctx.reply(
+    const msg = await ctx.reply(
       panel("CODE USED", [
         "◈  Already redeemed.",
         "◌  Each code is one-time only.",
-      ])
+      ]),
+      keyboard
     );
+    setTimeout(() => safeDelete(ctx.telegram, ctx.chat!.id, msg.message_id), 8000);
     return;
   }
 
@@ -158,10 +194,16 @@ export async function handleCodeRedeem(
     .set({ balance: newBalance })
     .where(eq(usersTable.id, user.id));
 
-  await ctx.reply(
+  // Also delete the /code command message
+  await safeDelete(ctx.telegram, ctx.chat!.id, ctx.message?.message_id);
+
+  const msg = await ctx.reply(
     panel("CODE REDEEMED ✦", [
       `◉  +${found.points} pts added`,
       `◈  New balance: ${newBalance} pts`,
-    ])
+    ]),
+    keyboard
   );
+  // Auto-delete after 8 seconds
+  setTimeout(() => safeDelete(ctx.telegram, ctx.chat!.id, msg.message_id), 8000);
 }

@@ -7,7 +7,7 @@ export const DB_CHANNEL_ID = -1003946101072;
 
 export const DAILY_POINTS = 10;
 export const REFERRAL_POINTS = 10;
-export const REDEEM_COST = 50;
+export const REDEEM_COST = 1;
 
 export const BOT_START_TIME = Date.now();
 

@@ -23,6 +23,27 @@ export async function sendAnimated(
   return msg.message_id;
 }
 
+export async function editAnimated(
+  ctx: BotContext,
+  msgId: number,
+  frames: string[],
+  delayMs = 400
+): Promise<void> {
+  for (const frame of frames) {
+    try {
+      await ctx.telegram.editMessageText(
+        ctx.chat!.id,
+        msgId,
+        undefined,
+        frame
+      );
+    } catch {
+      // ignore
+    }
+    await sleep(delayMs);
+  }
+}
+
 export const BOOT_FRAMES = [
   `◌  INITIALIZING...`,
   `◎  BOOT SEQUENCE...`,
@@ -69,9 +90,4 @@ export const LINK_FRAMES = [
   `◌  GENERATING LINK...`,
   `◎  ENCRYPTING...`,
   `◉  LINK READY`,
-];
-
-export const SUCCESS_FRAMES = [
-  `◎  SUCCESS`,
-  `◉  CONFIRMED ✦`,
 ];

@@ -4,9 +4,7 @@ import { eq } from "drizzle-orm";
 import type { BotContext } from "../types.js";
 import { panel, timeUntil } from "../utils/format.js";
 import { DAILY_POINTS } from "../config.js";
-import { sendAnimated, CLAIM_FRAMES } from "../utils/animations.js";
-import { safeDelete } from "../utils/safe-delete.js";
-import { sleep } from "../utils/sleep.js";
+import { editAnimated, CLAIM_FRAMES } from "../utils/animations.js";
 
 const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
 
@@ -67,10 +65,15 @@ export async function handleDailyClaim(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Animate claim
-  const animId = await sendAnimated(ctx, CLAIM_FRAMES, 450);
-  await sleep(300);
-  await safeDelete(ctx.telegram, ctx.chat!.id, animId);
+  // Animate in-place on the current message
+  const msgId =
+    ctx.callbackQuery && "message" in ctx.callbackQuery
+      ? ctx.callbackQuery.message?.message_id
+      : null;
+
+  if (msgId) {
+    await editAnimated(ctx, msgId, CLAIM_FRAMES, 420);
+  }
 
   const newBalance = user.balance + DAILY_POINTS;
   await db
@@ -78,15 +81,20 @@ export async function handleDailyClaim(ctx: BotContext): Promise<void> {
     .set({ balance: newBalance, lastDailyClaim: now })
     .where(eq(usersTable.id, user.id));
 
-  const text = panel("REWARD CLAIMED ✦", [
+  const successText = panel("REWARD CLAIMED ✦", [
     `◉  +${DAILY_POINTS} pts added`,
     `◈  Balance: ${newBalance} pts`,
     "─────────────────────",
     "◎  Come back in 24h",
   ]);
 
-  await ctx.reply(
-    text,
-    Markup.inlineKeyboard([[Markup.button.callback("« BACK TO MENU", "menu")]])
-  );
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback("« BACK TO MENU", "menu")],
+  ]);
+
+  try {
+    await ctx.editMessageText(successText, keyboard);
+  } catch {
+    await ctx.reply(successText, keyboard);
+  }
 }

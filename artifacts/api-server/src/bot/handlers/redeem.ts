@@ -3,10 +3,8 @@ import { db, usersTable, accountsTable } from "@workspace/db";
 import { eq, asc, count } from "drizzle-orm";
 import type { BotContext } from "../types.js";
 import { panel } from "../utils/format.js";
-import { REDEEM_COST } from "../config.js";
-import { sendAnimated, REDEEM_FRAMES } from "../utils/animations.js";
-import { safeDelete } from "../utils/safe-delete.js";
-import { sleep } from "../utils/sleep.js";
+import { REDEEM_COST, DB_CHANNEL_ID } from "../config.js";
+import { editAnimated, REDEEM_FRAMES } from "../utils/animations.js";
 
 export async function showRedeemConfirm(ctx: BotContext): Promise<void> {
   const user = ctx.dbUser;
@@ -39,7 +37,7 @@ export async function showRedeemConfirm(ctx: BotContext): Promise<void> {
   }
 
   const text = panel("REDEEM ACCOUNT", [
-    `◈  Cost ──── ${REDEEM_COST} pts`,
+    `◈  Cost ──── ${REDEEM_COST} pt`,
     `◎  Balance ─ ${user.balance} pts`,
     `◌  Stock ─── ${stockCount} files`,
     "─────────────────────",
@@ -73,10 +71,15 @@ export async function handleRedeemConfirm(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Show animation
-  const animId = await sendAnimated(ctx, REDEEM_FRAMES, 450);
-  await sleep(300);
-  await safeDelete(ctx.telegram, ctx.chat!.id, animId);
+  // Animate in-place on the current menu message
+  const msgId =
+    ctx.callbackQuery && "message" in ctx.callbackQuery
+      ? ctx.callbackQuery.message?.message_id
+      : null;
+
+  if (msgId) {
+    await editAnimated(ctx, msgId, REDEEM_FRAMES, 420);
+  }
 
   // Fetch first unused account
   const [account] = await db
@@ -91,10 +94,17 @@ export async function handleRedeemConfirm(ctx: BotContext): Promise<void> {
       "◈  No accounts available.",
       "◌  Check back later.",
     ]);
-    await ctx.reply(
-      text,
-      Markup.inlineKeyboard([[Markup.button.callback("« BACK", "menu")]])
-    );
+    try {
+      await ctx.editMessageText(
+        text,
+        Markup.inlineKeyboard([[Markup.button.callback("« BACK", "menu")]])
+      );
+    } catch {
+      await ctx.reply(
+        text,
+        Markup.inlineKeyboard([[Markup.button.callback("« BACK", "menu")]])
+      );
+    }
     return;
   }
 
@@ -104,36 +114,44 @@ export async function handleRedeemConfirm(ctx: BotContext): Promise<void> {
     .set({ isUsed: true, usedBy: user.id, usedAt: new Date() })
     .where(eq(accountsTable.id, account.id));
 
+  const newBalance = user.balance - REDEEM_COST;
   await db
     .update(usersTable)
     .set({
-      balance: user.balance - REDEEM_COST,
+      balance: newBalance,
       totalRedeems: user.totalRedeems + 1,
     })
     .where(eq(usersTable.id, user.id));
 
-  // Copy account file from DB channel to user
+  // Forward the actual .txt file from DB channel
   try {
-    await ctx.telegram.copyMessage(ctx.chat!.id, DB_CHANNEL_ID, account.messageId);
+    await ctx.telegram.forwardMessage(ctx.chat!.id, DB_CHANNEL_ID, account.messageId);
   } catch {
-    // If copy fails, send the link instead
+    // Fallback: send the direct link if forward fails
     await ctx.reply(
       panel("ACCOUNT READY", [
         `◈  File: ${account.fileName}`,
         `◎  Link: ${account.messageLink}`,
       ])
     );
-    return;
   }
 
+  // Edit the menu message to show success with back button
   const successText = panel("REDEEM SUCCESS ✦", [
-    `◉  Account delivered.`,
-    `◈  Cost: ${REDEEM_COST} pts`,
-    `◎  Remaining: ${user.balance - REDEEM_COST} pts`,
+    `◉  File delivered above.`,
+    `◈  Cost: ${REDEEM_COST} pt`,
+    `◎  Remaining: ${newBalance} pts`,
   ]);
 
-  await ctx.reply(
-    successText,
-    Markup.inlineKeyboard([[Markup.button.callback("« BACK TO MENU", "menu")]])
-  );
+  try {
+    await ctx.editMessageText(
+      successText,
+      Markup.inlineKeyboard([[Markup.button.callback("« BACK TO MENU", "menu")]])
+    );
+  } catch {
+    await ctx.reply(
+      successText,
+      Markup.inlineKeyboard([[Markup.button.callback("« BACK TO MENU", "menu")]])
+    );
+  }
 }

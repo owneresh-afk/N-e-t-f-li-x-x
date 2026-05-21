@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { startBot } from "./bot/index";
 
 const rawPort = process.env["PORT"];
 
@@ -22,4 +23,10 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+});
+
+// Start Telegram bot (long polling — runs indefinitely)
+startBot().catch((err) => {
+  logger.error({ err }, "Bot crashed unexpectedly");
+  process.exit(1);
 });

@@ -9,15 +9,15 @@ export async function registerMiddleware(
 ): Promise<void> {
   const tgUser = ctx.from;
 
+  // Updates with no sender (anonymous channel posts etc.) — pass straight through
   if (!tgUser) {
-    // Updates with no sender (channel posts etc.) — pass through
     return next();
   }
 
   const uid = tgUser.id;
 
   try {
-    logger.info({ uid }, "[MIDDLEWARE] Registering user");
+    logger.info({ uid }, "[MIDDLEWARE] Looking up user");
 
     const existing = await db
       .select()
@@ -28,7 +28,7 @@ export async function registerMiddleware(
     if (existing.length > 0) {
       ctx.dbUser = existing[0]!;
 
-      // Sync display name if changed
+      // Sync display name if it changed
       const u = existing[0]!;
       const newUsername = tgUser.username ?? null;
       const newFirst = tgUser.first_name || "User";
@@ -38,10 +38,12 @@ export async function registerMiddleware(
           .set({ username: newUsername, firstName: newFirst })
           .where(eq(usersTable.id, uid));
         ctx.dbUser = { ...u, username: newUsername, firstName: newFirst };
+        logger.info({ uid }, "[MIDDLEWARE] User display name synced");
+      } else {
+        logger.info({ uid }, "[MIDDLEWARE] User loaded");
       }
-
-      logger.info({ uid }, "[MIDDLEWARE] User found in DB");
     } else {
+      // First-time user — create record
       const [newUser] = await db
         .insert(usersTable)
         .values({
@@ -56,21 +58,14 @@ export async function registerMiddleware(
         })
         .returning();
       ctx.dbUser = newUser!;
-      logger.info({ uid }, "[MIDDLEWARE] New user registered");
+      logger.info({ uid }, "[MIDDLEWARE] New user created");
     }
   } catch (err) {
-    logger.error({ err, uid }, "[MIDDLEWARE] DB error — continuing without dbUser");
-    // Do NOT block next() — let the handler decide what to do with a missing dbUser
-    // This prevents the entire bot from freezing when the DB is temporarily unavailable
-    try {
-      await ctx.reply(
-        "⎋ ─〔 SERVICE UNAVAILABLE 〕─────\n│\n│  ◌  Database unreachable.\n│  ◌  Please try again shortly.\n│\n──────────────────────────────"
-      );
-    } catch {
-      // ignore — user may have blocked the bot
-    }
-    return; // Do not call next() so handlers don't run with undefined dbUser
+    // Log the full error but ALWAYS call next() — never freeze the chain.
+    // Handlers check ctx.dbUser before acting, so missing dbUser is handled gracefully.
+    logger.error({ err, uid }, "[MIDDLEWARE] DB error — continuing with dbUser=undefined");
   }
 
+  // next() runs regardless of whether the DB query succeeded or failed
   return next();
 }

@@ -1,13 +1,13 @@
 import { Markup } from "telegraf";
 import type { BotContext } from "../../types.js";
-import { panel } from "../../utils/format.js";
+import { consolePanel } from "../../utils/format.js";
 
 export async function showAdminPanel(ctx: BotContext): Promise<void> {
-  const text = panel("ADMIN PANEL", [
-    "◈  Full control access",
-    "─────────────────────",
-    "◎  Select operation:",
-  ]);
+  const adminName = ctx.from?.username ? `@${ctx.from.username}` : "Admin";
+  const text = consolePanel(
+    [`⌘  ELEVATED ACCESS`, `◈  ${adminName}`],
+    [`›  Select an operation:`]
+  );
 
   const keyboard = Markup.inlineKeyboard([
     [
@@ -30,7 +30,7 @@ export async function showAdminPanel(ctx: BotContext): Promise<void> {
       await ctx.editMessageText(text, keyboard);
       return;
     } catch {
-      // fall through to reply
+      // fall through
     }
   }
   await ctx.reply(text, keyboard);

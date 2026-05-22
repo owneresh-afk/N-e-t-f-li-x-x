@@ -3,7 +3,7 @@ import type { InlineKeyboardButton } from "telegraf/types";
 import { db, usersTable, channelsTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type { BotContext } from "../types.js";
-import { panel } from "../utils/format.js";
+import { scannerPanel, alertPanel } from "../utils/format.js";
 import { safeDelete } from "../utils/safe-delete.js";
 import { sendAnimated, SCAN_FRAMES } from "../utils/animations.js";
 import { sleep } from "../utils/sleep.js";
@@ -54,21 +54,10 @@ export async function showVerificationPanel(ctx: BotContext): Promise<void> {
     .from(channelsTable)
     .where(eq(channelsTable.isActive, true));
 
-  const text = channels.length === 0
-    ? panel("VERIFICATION", [
-        "◈  No channels configured yet.",
-        "◎  Contact admin.",
-      ])
-    : panel("VERIFICATION REQUIRED", [
-        "◎  Join all channels below",
-        "◌  Then press VERIFY",
-        "─────────────────────",
-        `◈  ${channels.length} channel(s) required`,
-      ]);
-
+  const names = channels.map((c) => c.channelName);
+  const text = scannerPanel(names, channels.length);
   const msg = await ctx.reply(text, buildVerifyKeyboard(channels));
 
-  // Store active message
   if (ctx.dbUser) {
     await db
       .update(usersTable)
@@ -79,7 +68,6 @@ export async function showVerificationPanel(ctx: BotContext): Promise<void> {
 
 export async function handleVerify(ctx: BotContext): Promise<void> {
   await ctx.answerCbQuery();
-
   const user = ctx.dbUser;
   if (!user) return;
 
@@ -88,9 +76,8 @@ export async function handleVerify(ctx: BotContext): Promise<void> {
     .from(channelsTable)
     .where(eq(channelsTable.isActive, true));
 
-  // Scan animation
-  const animId = await sendAnimated(ctx, SCAN_FRAMES, 450);
-  await sleep(400);
+  const animId = await sendAnimated(ctx, SCAN_FRAMES, 430);
+  await sleep(350);
   await safeDelete(ctx.telegram, ctx.chat!.id, animId);
 
   if (channels.length === 0) {
@@ -104,9 +91,9 @@ export async function handleVerify(ctx: BotContext): Promise<void> {
   const allJoined = results.every(Boolean);
 
   if (!allJoined) {
-    const failText = panel("VERIFICATION FAILED", [
-      "◈  Not all channels joined.",
-      "◌  Join all and try again.",
+    const failText = alertPanel("SCAN FAILED", [
+      "Not all channels joined.",
+      "Join all channels and try again.",
     ]);
     try {
       await ctx.editMessageText(failText, buildVerifyKeyboard(channels));
@@ -126,10 +113,14 @@ async function completeVerification(ctx: BotContext): Promise<void> {
     .set({ isVerified: true, verificationVersion: globalVersion })
     .where(eq(usersTable.id, ctx.from!.id));
 
-  const successText = panel("VERIFIED ✦", [
-    "◉  Access granted.",
-    "◎  Welcome to the system.",
-  ]);
+  const successText = [
+    `◉ ─〔 ACCESS GRANTED ✦ 〕──────────`,
+    `│`,
+    `│  ◎  Identity verified.`,
+    `│  ◌  Welcome to the system.`,
+    `│`,
+    `──────────────────────────────────`,
+  ].join("\n");
 
   try {
     await ctx.editMessageText(successText, Markup.inlineKeyboard([]));
@@ -139,7 +130,6 @@ async function completeVerification(ctx: BotContext): Promise<void> {
 
   await sleep(1200);
 
-  // Delete verification message
   try {
     if (ctx.callbackQuery && "message" in ctx.callbackQuery) {
       await safeDelete(
@@ -152,7 +142,6 @@ async function completeVerification(ctx: BotContext): Promise<void> {
     // ignore
   }
 
-  // Refresh dbUser
   const [updated] = await db
     .select()
     .from(usersTable)
@@ -160,7 +149,6 @@ async function completeVerification(ctx: BotContext): Promise<void> {
     .limit(1);
   ctx.dbUser = updated;
 
-  // Award referral points if applicable
   const { awardReferralPoints } = await import("./referral.js");
   await awardReferralPoints(ctx);
 

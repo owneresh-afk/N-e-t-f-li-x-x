@@ -2,18 +2,16 @@ import { Markup } from "telegraf";
 import { db, channelsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type { BotContext } from "../../types.js";
-import { panel } from "../../utils/format.js";
+import { stepConsole, successPanel, alertPanel } from "../../utils/format.js";
 import { setConvo, clearConvo } from "../../convo-state.js";
 
 export async function startAddChannel(ctx: BotContext): Promise<void> {
   await ctx.answerCbQuery();
   setConvo(ctx.from!.id, { type: "add_channel_id", data: {} });
 
-  const text = panel("ADD CHANNEL", [
-    "◈  Step 1 of 3",
-    "─────────────────────",
-    "◎  Enter Channel ID:",
-    "◌  Example: -1001234567890",
+  const text = stepConsole("ADD CHANNEL", 1, 3, [
+    `◎  Enter Channel ID:`,
+    `◌  e.g. -1001234567890`,
   ]);
 
   try {
@@ -29,20 +27,12 @@ export async function startAddChannel(ctx: BotContext): Promise<void> {
   }
 }
 
-export async function handleChannelId(
-  ctx: BotContext,
-  channelId: string
-): Promise<void> {
-  setConvo(ctx.from!.id, {
-    type: "add_channel_name",
-    data: { channelId: channelId.trim() },
-  });
+export async function handleChannelId(ctx: BotContext, channelId: string): Promise<void> {
+  setConvo(ctx.from!.id, { type: "add_channel_name", data: { channelId: channelId.trim() } });
 
-  const text = panel("ADD CHANNEL", [
-    "◈  Step 2 of 3",
-    "─────────────────────",
-    "◎  Enter Channel Name:",
-    "◌  Example: Main Channel",
+  const text = stepConsole("ADD CHANNEL", 2, 3, [
+    `◎  Enter Channel Name:`,
+    `◌  e.g. Main Channel`,
   ]);
 
   await ctx.reply(
@@ -61,11 +51,9 @@ export async function handleChannelName(
     data: { ...prevData, channelName: name.trim() },
   });
 
-  const text = panel("ADD CHANNEL", [
-    "◈  Step 3 of 3",
-    "─────────────────────",
-    "◎  Enter Channel Link:",
-    "◌  Example: https://t.me/channelname",
+  const text = stepConsole("ADD CHANNEL", 3, 3, [
+    `◎  Enter Channel Link:`,
+    `◌  e.g. https://t.me/channel`,
   ]);
 
   await ctx.reply(
@@ -93,11 +81,10 @@ export async function handleChannelLink(
     isActive: true,
   });
 
-  const text = panel("CHANNEL ADDED ✦", [
-    `◈  Name: ${channelName}`,
-    `◎  ID: ${channelId}`,
-    "─────────────────────",
-    "◉  Added to verification.",
+  const text = successPanel("CHANNEL ADDED", [
+    `◈  Name ···  ${channelName}`,
+    `◎  ID ·····  ${channelId}`,
+    `◌  Added to verification.`,
   ]);
 
   await ctx.reply(
@@ -115,9 +102,7 @@ export async function showRemoveChannels(ctx: BotContext): Promise<void> {
     .where(eq(channelsTable.isActive, true));
 
   if (channels.length === 0) {
-    const text = panel("REMOVE CHANNEL", [
-      "◈  No channels configured.",
-    ]);
+    const text = alertPanel("NO CHANNELS", ["No active channels configured."]);
     try {
       await ctx.editMessageText(
         text,
@@ -133,16 +118,15 @@ export async function showRemoveChannels(ctx: BotContext): Promise<void> {
   }
 
   const buttons = channels.map((ch) => [
-    Markup.button.callback(
-      `⎋  ${ch.channelName}`,
-      `adm_rem_ch_${ch.id}`
-    ),
+    Markup.button.callback(`⎋  ${ch.channelName}`, `adm_rem_ch_${ch.id}`),
   ]);
   buttons.push([Markup.button.callback("« BACK", "admin")]);
 
-  const text = panel("REMOVE CHANNEL", [
-    "◈  Select to remove:",
-  ]);
+  const text = [
+    `╔══〔 REMOVE CHANNEL 〕══╗`,
+    `║  ◌  Select to deactivate:`,
+    `╚════════════════════════╝`,
+  ].join("\n");
 
   try {
     await ctx.editMessageText(text, Markup.inlineKeyboard(buttons));
@@ -162,9 +146,9 @@ export async function handleRemoveChannel(
     .set({ isActive: false })
     .where(eq(channelsTable.id, channelDbId));
 
-  const text = panel("CHANNEL REMOVED ✦", [
-    "◉  Channel deactivated.",
-    "◌  Users no longer need to join it.",
+  const text = successPanel("CHANNEL REMOVED", [
+    `◉  Channel deactivated.`,
+    `◌  No longer required for verify.`,
   ]);
 
   try {

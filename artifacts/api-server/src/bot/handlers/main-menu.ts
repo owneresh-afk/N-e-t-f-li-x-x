@@ -2,23 +2,13 @@ import { Markup } from "telegraf";
 import { db, usersTable, accountsTable } from "@workspace/db";
 import { eq, count } from "drizzle-orm";
 import type { BotContext } from "../types.js";
-import { panel } from "../utils/format.js";
+import { ctrlPanel } from "../utils/format.js";
 import { safeDelete } from "../utils/safe-delete.js";
-
-export function buildMainMenuText(username: string, balance: number, stock: number): string {
-  return panel("MAIN MENU", [
-    `◈  ${username}`,
-    `◎  Balance ─── ${balance} pts`,
-    `◌  Stock ───── ${stock} files`,
-    "─────────────────────",
-    "◇  Select an option below",
-  ]);
-}
 
 export const MAIN_MENU_KEYBOARD = Markup.inlineKeyboard([
   [
     Markup.button.callback("◈  MY PROFILE", "profile"),
-    Markup.button.callback("◆  REDEEM ACCOUNT", "redeem"),
+    Markup.button.callback("◆  REDEEM", "redeem"),
   ],
   [
     Markup.button.callback("◎  TUTORIAL", "tutorial"),
@@ -44,13 +34,10 @@ export async function showMainMenu(
     .where(eq(accountsTable.isUsed, false));
 
   const stockCount = Number(stockRow?.count ?? 0);
-  const displayName = user.username
-    ? `@${user.username}`
-    : user.firstName;
-  const text = buildMainMenuText(displayName, user.balance, stockCount);
+  const displayName = user.username ? `@${user.username}` : user.firstName;
+  const text = ctrlPanel(displayName, user.balance, stockCount);
 
   if (newMessage) {
-    // Delete previous active message first
     await safeDelete(ctx.telegram, ctx.chat!.id, user.activeMessageId);
     const msg = await ctx.reply(text, MAIN_MENU_KEYBOARD);
     await db

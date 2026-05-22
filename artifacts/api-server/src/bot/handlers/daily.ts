@@ -2,7 +2,7 @@ import { Markup } from "telegraf";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type { BotContext } from "../types.js";
-import { panel, timeUntil } from "../utils/format.js";
+import { minimalPanel, timeUntil } from "../utils/format.js";
 import { DAILY_POINTS } from "../config.js";
 import { editAnimated, CLAIM_FRAMES } from "../utils/animations.js";
 
@@ -22,17 +22,17 @@ export async function showDaily(ctx: BotContext): Promise<void> {
     : now;
 
   const text = canClaim
-    ? panel("DAILY REWARDS", [
-        `◈  Reward ── ${DAILY_POINTS} pts`,
-        `◎  Status ── AVAILABLE`,
-        "─────────────────────",
-        "◉  Ready to claim!",
+    ? minimalPanel("DAILY REWARD", [
+        `◈  Reward ·····  ${DAILY_POINTS} pts`,
+        `◎  Status ·····  AVAILABLE`,
+        `──────────────────────`,
+        `◉  Ready to claim`,
       ])
-    : panel("DAILY REWARDS", [
-        `◈  Reward ── ${DAILY_POINTS} pts`,
-        `◎  Status ── CLAIMED`,
-        "─────────────────────",
-        `◌  Next in: ${timeUntil(nextClaim)}`,
+    : minimalPanel("DAILY REWARD", [
+        `◈  Reward ·····  ${DAILY_POINTS} pts`,
+        `◎  Status ·····  CLAIMED`,
+        `──────────────────────`,
+        `◌  Next in ·  ${timeUntil(nextClaim)}`,
       ]);
 
   const keyboard = canClaim
@@ -65,14 +65,13 @@ export async function handleDailyClaim(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Animate in-place on the current message
   const msgId =
     ctx.callbackQuery && "message" in ctx.callbackQuery
       ? ctx.callbackQuery.message?.message_id
       : null;
 
   if (msgId) {
-    await editAnimated(ctx, msgId, CLAIM_FRAMES, 420);
+    await editAnimated(ctx, msgId, CLAIM_FRAMES, 400);
   }
 
   const newBalance = user.balance + DAILY_POINTS;
@@ -81,11 +80,11 @@ export async function handleDailyClaim(ctx: BotContext): Promise<void> {
     .set({ balance: newBalance, lastDailyClaim: now })
     .where(eq(usersTable.id, user.id));
 
-  const successText = panel("REWARD CLAIMED ✦", [
-    `◉  +${DAILY_POINTS} pts added`,
-    `◈  Balance: ${newBalance} pts`,
-    "─────────────────────",
-    "◎  Come back in 24h",
+  const successText = minimalPanel("REWARD CLAIMED", [
+    `◉  +${DAILY_POINTS} pts credited`,
+    `◈  Balance ···  ${newBalance} pts`,
+    `──────────────────────`,
+    `◌  Come back in 24h`,
   ]);
 
   const keyboard = Markup.inlineKeyboard([

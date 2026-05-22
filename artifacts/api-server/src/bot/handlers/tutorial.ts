@@ -1,7 +1,6 @@
 import { Markup } from "telegraf";
 import type { BotContext } from "../types.js";
 import { TUTORIAL_CHANNEL_ID, TUTORIAL_MESSAGE_ID } from "../config.js";
-import { panel } from "../utils/format.js";
 
 export async function showTutorial(ctx: BotContext): Promise<void> {
   await ctx.answerCbQuery();
@@ -19,14 +18,22 @@ export async function showTutorial(ctx: BotContext): Promise<void> {
   }
 
   const resultText = sent
-    ? panel("TUTORIAL ✦", [
-        "◉  Tutorial sent above.",
-        "◌  Scroll up to view it.",
-      ])
-    : panel("TUTORIAL", [
-        "◈  Tutorial unavailable.",
-        "◌  Contact admin for help.",
-      ]);
+    ? [
+        `╭──〔 TUTORIAL 〕──────────╮`,
+        `│`,
+        `│  ◉  Tutorial sent above.`,
+        `│  ◌  Scroll up to view it.`,
+        `│`,
+        `╰──────────────────────────╯`,
+      ].join("\n")
+    : [
+        `⎋ ─〔 TUTORIAL UNAVAILABLE 〕──────`,
+        `│`,
+        `│  ◌  Could not load tutorial.`,
+        `│  ◌  Contact admin for help.`,
+        `│`,
+        `──────────────────────────────────`,
+      ].join("\n");
 
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback("« BACK TO MENU", "menu")],

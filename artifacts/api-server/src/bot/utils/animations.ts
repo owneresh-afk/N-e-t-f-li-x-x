@@ -44,50 +44,48 @@ export async function editAnimated(
   }
 }
 
+// ─── Boot sequence ────────────────────────────────────────────────────────────
 export const BOOT_FRAMES = [
-  `◌  INITIALIZING...`,
-  `◎  BOOT SEQUENCE...`,
-  `◉  SYSTEM ONLINE`,
-  `⟳  LOADING MODULES`,
-  `✦  READY`,
+  `◌ ─── BOOT ─────────────────`,
+  `◎ ─── INIT ─────────────────`,
+  `⌁ ─── LOADING ──────────────`,
+  `◉ ─── SYSTEM ONLINE ────────`,
+  `✦ ─── READY ────────────────`,
 ];
 
-export const LOADING_FRAMES = [
-  `⌁  PROCESSING...\n\n▁▂▃`,
-  `⌁  PROCESSING...\n\n▁▂▃▄▅`,
-  `⌁  PROCESSING...\n\n▁▂▃▄▅▆▇`,
-  `◉  DONE`,
-];
-
+// ─── Scanner (verification) ───────────────────────────────────────────────────
 export const SCAN_FRAMES = [
-  `╭────────────────╮\n│  ▌  SCANNING.. │\n╰────────────────╯`,
-  `╭────────────────╮\n│     ▌ SCAN..   │\n╰────────────────╯`,
-  `╭────────────────╮\n│        ▌ SCAN  │\n╰────────────────╯`,
-  `╭────────────────╮\n│  ◉  VERIFIED   │\n╰────────────────╯`,
+  `╭────────────────────╮\n│  ▏   SCANNING...    │\n╰────────────────────╯`,
+  `╭────────────────────╮\n│  ▌   SCANNING...    │\n╰────────────────────╯`,
+  `╭────────────────────╮\n│  ▊   SCANNING...    │\n╰────────────────────╯`,
+  `╭────────────────────╮\n│  ◉   SCAN DONE      │\n╰────────────────────╯`,
 ];
 
+// ─── Daily claim ──────────────────────────────────────────────────────────────
 export const CLAIM_FRAMES = [
-  `◌  PROCESSING CLAIM...`,
-  `◎  VERIFYING...`,
-  `◉  CONFIRMED`,
-  `✦  POINTS ADDED`,
+  `◌ ─── PROCESSING CLAIM ─────`,
+  `◎ ─── VERIFYING ────────────`,
+  `◉ ─── REWARD CONFIRMED ─────`,
+  `✦ ─── POINTS CREDITED ──────`,
 ];
 
+// ─── Code generator ───────────────────────────────────────────────────────────
 export const GENERATE_FRAMES = [
-  `◌  GENERATING...`,
-  `◎  ENCRYPTING CODES...`,
-  `◉  CODES READY`,
+  `◌ ─── GENERATING ───────────`,
+  `◎ ─── ENCRYPTING CODES ─────`,
+  `◉ ─── CODES READY ──────────`,
 ];
 
+// ─── Account redeem ───────────────────────────────────────────────────────────
 export const REDEEM_FRAMES = [
-  `╭────────────────╮\n│  ▌  FETCHING.. │\n╰────────────────╯`,
-  `╭────────────────╮\n│    ▌  FETCH..  │\n╰────────────────╯`,
-  `╭────────────────╮\n│      ▌  OK     │\n╰────────────────╯`,
-  `╭────────────────╮\n│  ◉  ALLOCATED  │\n╰────────────────╯`,
+  `╭────────────────────╮\n│  ⌁   FETCHING...    │\n╰────────────────────╯`,
+  `╭────────────────────╮\n│  ⌁   ALLOCATING...  │\n╰────────────────────╯`,
+  `╭────────────────────╮\n│  ◉   FILE READY ✦   │\n╰────────────────────╯`,
 ];
 
+// ─── Link generator ───────────────────────────────────────────────────────────
 export const LINK_FRAMES = [
-  `◌  GENERATING LINK...`,
-  `◎  ENCRYPTING...`,
-  `◉  LINK READY`,
+  `◌ ─── GENERATING LINK ──────`,
+  `◎ ─── ENCRYPTING ───────────`,
+  `◉ ─── LINK READY ───────────`,
 ];

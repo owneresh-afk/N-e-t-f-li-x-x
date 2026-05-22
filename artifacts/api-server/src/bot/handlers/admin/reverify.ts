@@ -2,17 +2,20 @@ import { Markup } from "telegraf";
 import { db, usersTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type { BotContext } from "../../types.js";
-import { panel } from "../../utils/format.js";
+import { successPanel } from "../../utils/format.js";
 
 export async function showReverifyConfirm(ctx: BotContext): Promise<void> {
   await ctx.answerCbQuery();
 
-  const text = panel("RESTART VERIFICATION", [
-    "◈  This will force ALL users",
-    "◌  to re-verify — including admins.",
-    "─────────────────────",
-    "⎋  This cannot be undone.",
-  ]);
+  const text = [
+    `⎋ ─〔 CRITICAL OPERATION 〕─────────`,
+    `│`,
+    `│  ◈  Resets ALL users`,
+    `│  ◌  Admins included`,
+    `│  ◆  Cannot be undone`,
+    `│`,
+    `──────────────────────────────────`,
+  ].join("\n");
 
   try {
     await ctx.editMessageText(
@@ -36,7 +39,6 @@ export async function showReverifyConfirm(ctx: BotContext): Promise<void> {
 export async function handleReverifyConfirm(ctx: BotContext): Promise<void> {
   await ctx.answerCbQuery();
 
-  // Increment verification version in settings
   const rows = await db
     .select()
     .from(settingsTable)
@@ -58,16 +60,12 @@ export async function handleReverifyConfirm(ctx: BotContext): Promise<void> {
     });
   }
 
-  // Mark all users as unverified
-  await db
-    .update(usersTable)
-    .set({ isVerified: false, verificationVersion: 0 });
+  await db.update(usersTable).set({ isVerified: false, verificationVersion: 0 });
 
-  const text = panel("VERIFICATION RESET ✦", [
-    "◉  All users must re-verify.",
-    `◈  New version: ${newVersion}`,
-    "─────────────────────",
-    "◌  Active on next /start",
+  const text = successPanel("VERIFICATION RESET", [
+    `◉  All users must re-verify.`,
+    `◈  Version ···  ${newVersion}`,
+    `◌  Active on next /start`,
   ]);
 
   try {

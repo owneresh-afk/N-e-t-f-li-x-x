@@ -1,20 +1,18 @@
 import { Markup } from "telegraf";
 import { db, usersTable } from "@workspace/db";
 import type { BotContext } from "../../types.js";
-import { panel } from "../../utils/format.js";
+import { broadcastPanel, broadcastCompletePanel, stepConsole } from "../../utils/format.js";
 import { setConvo, clearConvo } from "../../convo-state.js";
 import { sleep } from "../../utils/sleep.js";
 
 export async function startBroadcast(ctx: BotContext): Promise<void> {
   await ctx.answerCbQuery();
-  const text = panel("BROADCAST", [
-    "◈  Send your message.",
-    "◌  All users will receive it.",
-    "─────────────────────",
-    "◎  Type message now:",
-  ]);
-
   setConvo(ctx.from!.id, { type: "broadcast", data: {} });
+
+  const text = stepConsole("BROADCAST", 1, 1, [
+    `◎  Send your message below.`,
+    `◌  It will reach all users.`,
+  ]);
 
   try {
     await ctx.editMessageText(
@@ -38,12 +36,7 @@ export async function handleBroadcastMessage(
   const users = await db.select({ id: usersTable.id }).from(usersTable);
   const total = users.length;
 
-  const progressText = panel("BROADCASTING", [
-    `◈  Total: ${total}`,
-    `◎  Status: SENDING...`,
-  ]);
-
-  const statusMsg = await ctx.reply(progressText);
+  const statusMsg = await ctx.reply(broadcastPanel(0, total, 0, 0));
 
   let success = 0;
   let failed = 0;
@@ -57,34 +50,22 @@ export async function handleBroadcastMessage(
       failed++;
     }
 
-    // Update progress every 10 users
     if ((i + 1) % 10 === 0 || i === users.length - 1) {
       try {
-        const progressBar = buildProgress(i + 1, total);
         await ctx.telegram.editMessageText(
           chatId,
           statusMsg.message_id,
           undefined,
-          panel("BROADCASTING", [
-            `◈  Progress: ${i + 1}/${total}`,
-            `  ${progressBar}`,
-            `◎  Success: ${success}`,
-            `◌  Failed:  ${failed}`,
-          ])
+          broadcastPanel(i + 1, total, success, failed)
         );
       } catch {
-        // ignore edit errors
+        // ignore
       }
       await sleep(50);
     }
   }
 
-  const finalText = panel("BROADCAST COMPLETE ✦", [
-    `◈  Sent ──── ${success}`,
-    `◌  Failed ── ${failed}`,
-    `◎  Total ─── ${total}`,
-  ]);
-
+  const finalText = broadcastCompletePanel(success, failed, total);
   try {
     await ctx.telegram.editMessageText(
       chatId,
@@ -99,10 +80,4 @@ export async function handleBroadcastMessage(
       Markup.inlineKeyboard([[Markup.button.callback("« BACK", "admin")]])
     );
   }
-}
-
-function buildProgress(done: number, total: number): string {
-  if (total === 0) return "▁▁▁▁▁▁▁▁";
-  const pct = Math.round((done / total) * 8);
-  return "█".repeat(pct) + "▁".repeat(8 - pct);
 }

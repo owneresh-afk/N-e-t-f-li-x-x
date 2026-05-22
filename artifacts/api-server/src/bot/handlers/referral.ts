@@ -1,6 +1,6 @@
 import { Markup } from "telegraf";
 import type { BotContext } from "../types.js";
-import { panel } from "../utils/format.js";
+import { minimalPanel } from "../utils/format.js";
 import { REFERRAL_POINTS } from "../config.js";
 import { editAnimated, LINK_FRAMES } from "../utils/animations.js";
 import { db, usersTable } from "@workspace/db";
@@ -11,14 +11,13 @@ export async function showReferral(ctx: BotContext): Promise<void> {
   const user = ctx.dbUser;
   if (!user) return;
 
-  // Animate in-place
   const msgId =
     ctx.callbackQuery && "message" in ctx.callbackQuery
       ? ctx.callbackQuery.message?.message_id
       : null;
 
   if (msgId) {
-    await editAnimated(ctx, msgId, LINK_FRAMES, 420);
+    await editAnimated(ctx, msgId, LINK_FRAMES, 400);
   }
 
   const botInfo = await ctx.telegram.getMe();
@@ -32,13 +31,14 @@ export async function showReferral(ctx: BotContext): Promise<void> {
   const refCount = Number(refRow?.count ?? 0);
   const refEarnings = refCount * REFERRAL_POINTS;
 
-  const text = panel("REFER & EARN", [
-    `◈  Per referral ─ ${REFERRAL_POINTS} pts`,
-    `◎  Total refs ─── ${refCount}`,
-    `◆  Total earned ─ ${refEarnings} pts`,
-    "─────────────────────",
-    "◌  Your referral link:",
-    `  ${refLink}`,
+  const text = minimalPanel("REFER & EARN", [
+    `⟡  Per referral ·  ${REFERRAL_POINTS} pts`,
+    `◎  Total refs ···  ${refCount}`,
+    `◆  Total earned ·  ${refEarnings} pts`,
+    `──────────────────────`,
+    `◌  Your referral link:`,
+    ``,
+    `${refLink}`,
   ]);
 
   const keyboard = Markup.inlineKeyboard([
@@ -58,7 +58,6 @@ export async function handleReferral(
 ): Promise<void> {
   const user = ctx.dbUser;
   if (!user) return;
-
   if (referrerId === user.id) return;
   if (user.referredBy !== null) return;
 
@@ -99,11 +98,15 @@ export async function awardReferralPoints(ctx: BotContext): Promise<void> {
   try {
     await ctx.telegram.sendMessage(
       referrer.id,
-      panel("REFERRAL BONUS ✦", [
-        `◉  +${REFERRAL_POINTS} pts earned`,
-        `◈  A referral verified.`,
-        `◎  New balance: ${referrer.balance + REFERRAL_POINTS} pts`,
-      ])
+      [
+        `◉ ─〔 REFERRAL BONUS ✦ 〕──────────`,
+        `│`,
+        `│  ⟡  +${REFERRAL_POINTS} pts earned`,
+        `│  ◈  A new referral verified.`,
+        `│  ◎  Balance ···  ${referrer.balance + REFERRAL_POINTS} pts`,
+        `│`,
+        `──────────────────────────────────`,
+      ].join("\n")
     );
   } catch {
     // User may have blocked the bot

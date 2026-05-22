@@ -3,6 +3,8 @@ import type { User } from "@workspace/db";
 
 export interface BotContext extends Context {
   dbUser?: User;
+  /** Set by registerMiddleware when a DB error prevents user lookup */
+  middlewareError?: string;
 }
 
 export type ConvoType =

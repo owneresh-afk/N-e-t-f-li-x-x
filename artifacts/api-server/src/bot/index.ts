@@ -27,7 +27,7 @@ import { showStockManager, handleDbChannelDocument, handleDeleteRange } from "./
 import { getConvo, clearConvo } from "./convo-state.js";
 import { alertPanel } from "./utils/format.js";
 import { logger } from "../lib/logger.js";
-import { testDbConnection } from "@workspace/db";
+import { testDbConnection, pool } from "@workspace/db";
 
 // ─── Token guard ──────────────────────────────────────────────────────────────
 const token = process.env["BOT_TOKEN"];
@@ -37,26 +37,25 @@ logger.info("[STARTUP] BOT_TOKEN loaded ✓");
 export const bot = new Telegraf<BotContext>(token);
 
 // ─── Global Telegraf error catcher ───────────────────────────────────────────
-// Catches ANY unhandled error in the entire middleware chain
 bot.catch((err, ctx) => {
   const uid = ctx.from?.id ?? "unknown";
   const updateType = ctx.updateType ?? "unknown";
-  logger.error({ err, uid, updateType }, "[BOT.CATCH] Unhandled error in middleware chain");
-  ctx
-    .reply(
-      [
-        `⎋ ─〔 INTERNAL ERROR 〕──────────`,
-        `│`,
-        `│  ◌  Something went wrong.`,
-        `│  ◌  Please try again or /start`,
-        `│`,
-        `──────────────────────────────────`,
-      ].join("\n")
-    )
-    .catch(() => {});
+  const msg = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  logger.error({ err, uid, updateType, message: msg, stack }, "[BOT.CATCH] Unhandled error in middleware chain");
+  ctx.reply(
+    [
+      `⎋ ─〔 INTERNAL ERROR 〕──────────`,
+      `│`,
+      `│  ◌  ${msg}`,
+      `│  ◌  Check Render logs.`,
+      `│`,
+      `──────────────────────────────────`,
+    ].join("\n")
+  ).catch(() => {});
 });
 
-// ─── /ping — zero dependencies, registered BEFORE all middleware ──────────────
+// ─── /ping — no DB, registered FIRST ─────────────────────────────────────────
 bot.command("ping", (ctx) => {
   const uid = ctx.from?.id ?? 0;
   logger.info({ uid }, "[COMMAND] /ping");
@@ -72,7 +71,7 @@ bot.command("ping", (ctx) => {
   );
 });
 
-// ─── /testlog — verify logging is flowing, no DB needed ──────────────────────
+// ─── /testlog — verify log pipeline, no DB ───────────────────────────────────
 bot.command("testlog", (ctx) => {
   const uid = ctx.from?.id ?? 0;
   logger.info({ uid }, "[TESTLOG] INFO test");
@@ -90,7 +89,7 @@ bot.command("testlog", (ctx) => {
   );
 });
 
-// ─── DB middleware — applied to everything below this line ────────────────────
+// ─── DB middleware — applied to everything below ──────────────────────────────
 bot.use(registerMiddleware);
 logger.info("[STARTUP] registerMiddleware loaded ✓");
 
@@ -131,18 +130,73 @@ bot.command("testdb", async (ctx) => {
   }
 });
 
+// ─── /diagnose — check all tables exist and are queryable ────────────────────
+bot.command("diagnose", async (ctx) => {
+  const uid = ctx.from?.id ?? 0;
+  logger.info({ uid }, "[DIAGNOSE] Starting table diagnostics");
+  await ctx.reply("◌ ─── Running diagnostics...").catch(() => {});
+
+  const tables = ["users", "channels", "accounts", "codes", "settings"];
+  const results: string[] = [];
+
+  for (const table of tables) {
+    try {
+      const res = await pool.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+          SELECT FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = $1
+        )`,
+        [table]
+      );
+      const exists = res.rows[0]?.exists === true;
+
+      if (exists) {
+        const countRes = await pool.query(`SELECT COUNT(*) AS cnt FROM "${table}"`);
+        const cnt = countRes.rows[0]?.cnt ?? "?";
+        results.push(`◎  ${table.padEnd(10)} EXISTS   rows: ${cnt}`);
+        logger.info({ uid, table, count: cnt }, "[DIAGNOSE] Table OK");
+      } else {
+        results.push(`⎋  ${table.padEnd(10)} MISSING`);
+        logger.error({ uid, table }, "[DIAGNOSE] Table MISSING — run schema migration");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      results.push(`⎋  ${table.padEnd(10)} ERROR: ${msg}`);
+      logger.error({ err, uid, table, message: msg }, "[DIAGNOSE] Table query threw");
+    }
+  }
+
+  const text = [
+    `◉ ─〔 DIAGNOSTICS 〕──────────────`,
+    `│`,
+    ...results.map((r) => `│  ${r}`),
+    `│`,
+    `──────────────────────────────────`,
+  ].join("\n");
+
+  logger.info({ uid, results }, "[DIAGNOSE] Complete");
+  await ctx.reply(text).catch(() => {});
+});
+
 // ─── Helper: gate handler behind dbUser existence ────────────────────────────
 async function requireUser(ctx: BotContext, handlerName: string): Promise<boolean> {
   if (ctx.dbUser) return true;
+
   const uid = ctx.from?.id ?? 0;
-  logger.error({ uid, handlerName }, "[GATE] dbUser missing — DB may be down");
+  // ctx.middlewareError carries the real DB error set by registerMiddleware
+  const reason = ctx.middlewareError ?? "Unknown — dbUser is undefined after middleware";
+  logger.error({ uid, handlerName, reason }, "[GATE] dbUser missing — middleware DB query failed");
+
   await ctx
     .reply(
       [
-        `⎋ ─〔 SERVICE UNAVAILABLE 〕──────`,
+        `⎋ ─〔 REGISTRATION FAILED 〕──────`,
         `│`,
-        `│  ◌  Database unreachable.`,
-        `│  ◌  Please try /start again.`,
+        `│  ◌  Could not load user record.`,
+        `│  ◌  Error: ${reason}`,
+        `│`,
+        `│  ◈  Run /diagnose to check tables`,
+        `│  ◈  Run /testdb to check connection`,
         `│`,
         `──────────────────────────────────`,
       ].join("\n")
@@ -154,14 +208,23 @@ async function requireUser(ctx: BotContext, handlerName: string): Promise<boolea
 // ─── /start ───────────────────────────────────────────────────────────────────
 bot.start(async (ctx) => {
   const uid = ctx.from?.id ?? 0;
-  logger.info({ uid }, "[COMMAND] /start");
+  logger.info({ uid }, "[COMMAND] /start received");
   if (!(await requireUser(ctx, "/start"))) return;
   try {
     await handleStart(ctx);
-    logger.info({ uid }, "[COMMAND] /start handled");
   } catch (err) {
-    logger.error({ err, uid }, "[COMMAND] /start threw");
-    await ctx.reply(alertPanel("ERROR", ["Failed to start.", "Try again."])).catch(() => {});
+    const msg = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    logger.error({ err, uid, message: msg, stack }, "[COMMAND] /start threw");
+    await ctx.reply(
+      [
+        `⎋ ─〔 START ERROR 〕─────────────`,
+        `│`,
+        `│  ◌  ${msg}`,
+        `│`,
+        `──────────────────────────────────`,
+      ].join("\n")
+    ).catch(() => {});
   }
 });
 
@@ -174,7 +237,8 @@ bot.command("admin", async (ctx) => {
   try {
     await showAdminPanel(ctx);
   } catch (err) {
-    logger.error({ err, uid }, "[COMMAND] /admin threw");
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err, uid, message: msg }, "[COMMAND] /admin threw");
   }
 });
 
@@ -186,18 +250,15 @@ bot.command("code", async (ctx) => {
   const parts = ctx.message.text.split(" ");
   if (parts.length < 2) {
     await ctx.reply(
-      [
-        `╔══〔 REDEEM CODE 〕══╗`,
-        `║  ◈  Usage: /code YOURCODE`,
-        `╚════════════════════╝`,
-      ].join("\n")
+      [`╔══〔 REDEEM CODE 〕══╗`, `║  ◈  Usage: /code YOURCODE`, `╚════════════════════╝`].join("\n")
     );
     return;
   }
   try {
     await handleCodeRedeem(ctx, parts[1]!.trim());
   } catch (err) {
-    logger.error({ err, uid }, "[COMMAND] /code threw");
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err, uid, message: msg }, "[COMMAND] /code threw");
   }
 });
 
@@ -209,9 +270,7 @@ bot.command("del", async (ctx) => {
   const text = ctx.message.text.replace("/del", "").trim();
   const parts = text.split("-").map((s) => s.trim());
   if (parts.length < 2) {
-    await ctx.reply(
-      [`╔══〔 DEL RANGE 〕══╗`, `║  ◌  /del LINK1 - LINK2`, `╚══════════════════╝`].join("\n")
-    );
+    await ctx.reply([`╔══〔 DEL RANGE 〕══╗`, `║  ◌  /del LINK1 - LINK2`, `╚══════════════════╝`].join("\n"));
     return;
   }
   const startId = extractMsgId(parts[0]!);
@@ -223,7 +282,8 @@ bot.command("del", async (ctx) => {
   try {
     await handleDeleteRange(ctx, startId, endId);
   } catch (err) {
-    logger.error({ err, uid }, "[COMMAND] /del threw");
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err, uid, message: msg }, "[COMMAND] /del threw");
   }
 });
 
@@ -234,11 +294,12 @@ bot.on("channel_post", async (ctx) => {
     if (post.chat.id !== DB_CHANNEL_ID) return;
     if (!("document" in post) || !post.document) return;
     if (!post.document.file_name?.toLowerCase().endsWith(".txt")) return;
-    logger.info({ msgId: post.message_id, chatId: post.chat.id }, "[STOCK] .txt upload detected");
+    logger.info({ msgId: post.message_id }, "[STOCK] .txt upload detected");
     await handleDbChannelDocument(ctx);
     logger.info({ msgId: post.message_id }, "[STOCK] Document indexed");
   } catch (err) {
-    logger.error({ err }, "[STOCK] channel_post handler threw");
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err, message: msg }, "[STOCK] channel_post handler threw");
   }
 });
 
@@ -250,18 +311,27 @@ bot.on("callback_query", async (ctx) => {
   logger.info({ uid, data }, "[CALLBACK] Received");
 
   try {
-    // Gate: require dbUser for all callbacks except "verify"
     if (data !== "verify") {
       if (!ctx.dbUser) {
-        logger.error({ uid, data }, "[CALLBACK] dbUser missing — DB may be down");
-        await ctx.answerCbQuery("Service unavailable. Try /start").catch(() => {});
+        const reason = ctx.middlewareError ?? "dbUser undefined after middleware";
+        logger.error({ uid, data, reason }, "[CALLBACK] dbUser missing");
+        await ctx.answerCbQuery("Registration failed — try /start").catch(() => {});
+        await ctx.reply(
+          [
+            `⎋ ─〔 REGISTRATION FAILED 〕──────`,
+            `│`,
+            `│  ◌  ${reason}`,
+            `│  ◈  Run /diagnose to check tables`,
+            `│`,
+            `──────────────────────────────────`,
+          ].join("\n")
+        ).catch(() => {});
         return;
       }
 
-      // Verification gate
       const needsVerif = await needsVerification(ctx);
       if (needsVerif) {
-        logger.info({ uid }, "[CALLBACK] User not verified — showing expired notice");
+        logger.info({ uid }, "[CALLBACK] User not verified");
         await ctx.answerCbQuery().catch(() => {});
         const txt = [
           `⎋ ─〔 SESSION EXPIRED 〕──────────`,
@@ -278,7 +348,6 @@ bot.on("callback_query", async (ctx) => {
 
     await ctx.answerCbQuery().catch(() => {});
 
-    // ── User navigation ──────────────────────────────────────────────────────
     if (data === "verify")         { await handleVerify(ctx);        return; }
     if (data === "menu")           { await showMainMenu(ctx, false); return; }
     if (data === "profile")        { await showProfile(ctx);         return; }
@@ -291,7 +360,6 @@ bot.on("callback_query", async (ctx) => {
     if (data === "balance")        { await showBalance(ctx);         return; }
     if (data === "stock")          { await showStock(ctx);           return; }
 
-    // ── Admin navigation ─────────────────────────────────────────────────────
     if (data === "admin") {
       if (!isAdmin(uid)) { await ctx.answerCbQuery("⎋ Access denied."); return; }
       await showAdminPanel(ctx); return;
@@ -312,13 +380,24 @@ bot.on("callback_query", async (ctx) => {
       return;
     }
 
-    logger.warn({ uid, data }, "[CALLBACK] No handler matched — unrecognised callback data");
+    logger.warn({ uid, data }, "[CALLBACK] No handler matched");
 
   } catch (err) {
-    logger.error({ err, uid, data }, "[CALLBACK] Handler threw — replying with error notice");
+    const msg = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    logger.error({ err, uid, data, message: msg, stack }, "[CALLBACK] Handler threw");
     try {
       await ctx.answerCbQuery("Error — check logs").catch(() => {});
-      await ctx.reply(alertPanel("ERROR", ["Handler failed.", "Check Render logs."]));
+      await ctx.reply(
+        [
+          `⎋ ─〔 CALLBACK ERROR 〕──────────`,
+          `│`,
+          `│  ◌  ${msg}`,
+          `│  ◌  Check Render logs.`,
+          `│`,
+          `──────────────────────────────────`,
+        ].join("\n")
+      );
     } catch { /* ignore */ }
   }
 });
@@ -333,19 +412,17 @@ bot.on("text", async (ctx) => {
 
   try {
     const text = ctx.message.text;
-    if (state.type === "broadcast")       { await handleBroadcastMessage(ctx, ctx.message.message_id); return; }
-    if (state.type === "gen_codes_count") { await handleCodesCount(ctx, text); return; }
-    if (state.type === "gen_codes_points") {
-      await handleCodesPoints(ctx, text, state.data["count"] as number);
-      return;
-    }
+    if (state.type === "broadcast")        { await handleBroadcastMessage(ctx, ctx.message.message_id); return; }
+    if (state.type === "gen_codes_count")  { await handleCodesCount(ctx, text); return; }
+    if (state.type === "gen_codes_points") { await handleCodesPoints(ctx, text, state.data["count"] as number); return; }
     if (state.type === "add_channel_id")   { await handleChannelId(ctx, text); return; }
     if (state.type === "add_channel_name") { await handleChannelName(ctx, text, state.data); return; }
     if (state.type === "add_channel_link") { await handleChannelLink(ctx, text, state.data); return; }
   } catch (err) {
-    logger.error({ err, uid, stateType: state.type }, "[CONVO] State handler threw");
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err, uid, stateType: state.type, message: msg }, "[CONVO] State handler threw");
     clearConvo(uid);
-    await ctx.reply(alertPanel("ERROR", ["State handler failed.", "Try again."])).catch(() => {});
+    await ctx.reply(alertPanel("ERROR", [msg])).catch(() => {});
   }
 });
 
@@ -361,11 +438,10 @@ export async function startBot(): Promise<void> {
   logger.info("[STARTUP] Verifying bot identity...");
   const me = await bot.telegram.getMe();
   logger.info({ username: me.username, id: me.id }, "[STARTUP] Bot identity confirmed ✓");
-
   logger.info("[STARTUP] Starting long polling (dropPendingUpdates=true)...");
   return bot.launch({ dropPendingUpdates: true });
 }
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
-process.once("SIGINT",  () => { logger.info("[SHUTDOWN] SIGINT  — stopping bot"); bot.stop("SIGINT");  });
-process.once("SIGTERM", () => { logger.info("[SHUTDOWN] SIGTERM — stopping bot"); bot.stop("SIGTERM"); });
+process.once("SIGINT",  () => { logger.info("[SHUTDOWN] SIGINT  — stopping"); bot.stop("SIGINT");  });
+process.once("SIGTERM", () => { logger.info("[SHUTDOWN] SIGTERM — stopping"); bot.stop("SIGTERM"); });

@@ -11,13 +11,15 @@ export async function registerMiddleware(
 
   // Updates with no sender (anonymous channel posts etc.) — pass straight through
   if (!tgUser) {
+    logger.info("[MIDDLEWARE] No ctx.from — passing through");
     return next();
   }
 
   const uid = tgUser.id;
+  logger.info({ uid, firstName: tgUser.first_name }, "[MIDDLEWARE] Processing user");
 
   try {
-    logger.info({ uid }, "[MIDDLEWARE] Looking up user");
+    logger.info({ uid }, "[MIDDLEWARE] SELECT user from DB...");
 
     const existing = await db
       .select()
@@ -25,25 +27,27 @@ export async function registerMiddleware(
       .where(eq(usersTable.id, uid))
       .limit(1);
 
+    logger.info({ uid, found: existing.length > 0 }, "[MIDDLEWARE] SELECT complete");
+
     if (existing.length > 0) {
       ctx.dbUser = existing[0]!;
 
-      // Sync display name if it changed
       const u = existing[0]!;
       const newUsername = tgUser.username ?? null;
       const newFirst = tgUser.first_name || "User";
       if (u.username !== newUsername || u.firstName !== newFirst) {
+        logger.info({ uid }, "[MIDDLEWARE] Syncing display name...");
         await db
           .update(usersTable)
           .set({ username: newUsername, firstName: newFirst })
           .where(eq(usersTable.id, uid));
         ctx.dbUser = { ...u, username: newUsername, firstName: newFirst };
-        logger.info({ uid }, "[MIDDLEWARE] User display name synced");
+        logger.info({ uid }, "[MIDDLEWARE] Display name synced");
       } else {
-        logger.info({ uid }, "[MIDDLEWARE] User loaded");
+        logger.info({ uid }, "[MIDDLEWARE] User loaded — no name change");
       }
     } else {
-      // First-time user — create record
+      logger.info({ uid }, "[MIDDLEWARE] New user — inserting...");
       const [newUser] = await db
         .insert(usersTable)
         .values({
@@ -58,14 +62,20 @@ export async function registerMiddleware(
         })
         .returning();
       ctx.dbUser = newUser!;
-      logger.info({ uid }, "[MIDDLEWARE] New user created");
+      logger.info({ uid }, "[MIDDLEWARE] New user inserted successfully");
     }
   } catch (err) {
-    // Log the full error but ALWAYS call next() — never freeze the chain.
-    // Handlers check ctx.dbUser before acting, so missing dbUser is handled gracefully.
-    logger.error({ err, uid }, "[MIDDLEWARE] DB error — continuing with dbUser=undefined");
+    const msg = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    // Store real error on context so downstream handlers can report it accurately
+    ctx.middlewareError = msg;
+    logger.error(
+      { err, uid, message: msg, stack },
+      "[MIDDLEWARE] DB query FAILED — ctx.dbUser will be undefined"
+    );
+    // ALWAYS call next() — never freeze the chain
   }
 
-  // next() runs regardless of whether the DB query succeeded or failed
+  logger.info({ uid, hasUser: !!ctx.dbUser, hasError: !!ctx.middlewareError }, "[MIDDLEWARE] Done — calling next()");
   return next();
 }

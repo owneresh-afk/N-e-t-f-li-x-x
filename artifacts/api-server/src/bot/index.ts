@@ -29,12 +29,11 @@ import { alertPanel } from "./utils/format.js";
 import { logger } from "../lib/logger.js";
 import { testDbConnection, pool } from "@workspace/db";
 
-// ─── Token guard ──────────────────────────────────────────────────────────────
-const token = process.env["BOT_TOKEN"];
-if (!token) throw new Error("[STARTUP] BOT_TOKEN is required but not set");
-logger.info("[STARTUP] BOT_TOKEN loaded ✓");
+// ─── Token guard — validated lazily in startBot() so module import never crashes ─
+const token = process.env["BOT_TOKEN"] ?? "";
+logger.info(token ? "[STARTUP] BOT_TOKEN loaded ✓" : "[STARTUP] BOT_TOKEN not set — bot will not start");
 
-export const bot = new Telegraf<BotContext>(token);
+export const bot = new Telegraf<BotContext>(token || "PLACEHOLDER_WILL_FAIL_GRACEFULLY");
 
 // ─── Global Telegraf error catcher ───────────────────────────────────────────
 bot.catch((err, ctx) => {
@@ -435,6 +434,10 @@ function extractMsgId(link: string): number | null {
 
 // ─── Launch ───────────────────────────────────────────────────────────────────
 export async function startBot(): Promise<void> {
+  if (!process.env["BOT_TOKEN"]) {
+    logger.error("[STARTUP] BOT_TOKEN is not set — Telegram bot will not start. Set it as a secret and restart.");
+    return;
+  }
   logger.info("[STARTUP] Verifying bot identity...");
   const me = await bot.telegram.getMe();
   logger.info({ username: me.username, id: me.id }, "[STARTUP] Bot identity confirmed ✓");

@@ -1,7 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { startBot } from "./bot/index";
-import { testDbConnection } from "@workspace/db";
+import { testDbConnection, initDb } from "@workspace/db";
 
 // ─── Global safety net ────────────────────────────────────────────────────────
 process.on("uncaughtException", (err) => {
@@ -23,26 +23,36 @@ if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${raw
 async function main(): Promise<void> {
   logger.info("[STARTUP] Server initialising...");
 
-  // 1. Test database connection before anything else
+  // 1. Test database connection
   logger.info("[DATABASE] Testing connection...");
   const dbCheck = await testDbConnection();
   if (dbCheck.ok) {
-    logger.info({ latencyMs: dbCheck.latencyMs }, "[DATABASE] Connected successfully");
+    logger.info({ latencyMs: dbCheck.latencyMs }, "[DATABASE] Connected successfully ✓");
   } else {
-    // Log but do NOT crash — the bot can still start and serve /ping
     logger.error({ error: dbCheck.error }, "[DATABASE] Connection FAILED — bot will run but DB features will fail");
   }
 
-  // 2. Start HTTP server
+  // 2. Initialize database schema (CREATE TABLE IF NOT EXISTS — always safe)
+  if (dbCheck.ok) {
+    logger.info("[DATABASE] Initializing schema...");
+    try {
+      await initDb();
+      logger.info("[DATABASE] All tables ready ✓");
+    } catch (err) {
+      logger.error({ err }, "[DATABASE] Schema initialization failed — DB features may not work");
+    }
+  }
+
+  // 3. Start HTTP server
   await new Promise<void>((resolve, reject) => {
     app.listen(port, (err?: Error) => {
       if (err) { reject(err); return; }
-      logger.info({ port }, "[STARTUP] HTTP server listening");
+      logger.info({ port }, "[STARTUP] HTTP server listening ✓");
       resolve();
     });
   });
 
-  // 3. Start Telegram bot
+  // 4. Start Telegram bot
   logger.info("[STARTUP] Starting Telegram bot...");
   try {
     await startBot();
